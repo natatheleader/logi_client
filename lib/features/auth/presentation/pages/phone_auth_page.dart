@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart' hide pop, push;
+import 'package:country_code_picker/country_code_picker.dart';
 import '../../../../core/di/injection_container.dart';
 import '../../../../core/router/app_router.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -24,6 +25,7 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
   late AnimationController _fadeController;
   late AnimationController _slideController;
   late PageController _pageController;
+  late ScrollController _scrollController;
   
   final _phoneController = TextEditingController();
   final _otpController = TextEditingController();
@@ -31,10 +33,14 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
   final _otpFocusNode = FocusNode();
   final _formKey = GlobalKey<FormState>();
 
+  String _countryCode = '+1';
+  String _countryFlag = '🇺🇸';
+
   @override
   void initState() {
     super.initState();
     _pageController = PageController();
+    _scrollController = ScrollController();
     
     _fadeController = AnimationController(
       duration: const Duration(milliseconds: 600),
@@ -47,6 +53,31 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
     );
 
     _fadeController.forward();
+
+    // Listen to keyboard visibility
+    _phoneFocusNode.addListener(() {
+      if (_phoneFocusNode.hasFocus) {
+        _scrollToBottom();
+      }
+    });
+
+    _otpFocusNode.addListener(() {
+      if (_otpFocusNode.hasFocus) {
+        _scrollToBottom();
+      }
+    });
+  }
+
+  void _scrollToBottom() {
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   @override
@@ -54,6 +85,7 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
     _fadeController.dispose();
     _slideController.dispose();
     _pageController.dispose();
+    _scrollController.dispose();
     _phoneController.dispose();
     _otpController.dispose();
     _phoneFocusNode.dispose();
@@ -70,35 +102,48 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
           if (state.isCodeSent) {
             _moveToOtpPage();
           } else if (state.isVerified) {
-            context.go(AppRoutes.home);
+            // Send Firebase token to backend
+            _authenticateWithBackend(state);
           } else if (state.hasError && state.error != null) {
             context.showErrorSnackBar(state.error!);
           }
         },
         child: Scaffold(
-          backgroundColor: Colors.white,
-          appBar: AppBar(
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            leading: IconButton(
-              onPressed: () => context.pop(),
-              icon: const Icon(Icons.arrow_back_ios, color: AppColors.textPrimary),
+          resizeToAvoidBottomInset: false, // Prevent automatic resize
+          body: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  AppColors.primary,
+                  AppColors.primary.withOpacity(0.8),
+                  AppColors.accent.withOpacity(0.6),
+                ],
+              ),
             ),
-            title: Text(
-              'Phone Authentication',
-              style: AppTextStyles.h4.copyWith(color: AppColors.textPrimary),
-            ),
-            centerTitle: true,
-          ),
-          body: FadeTransition(
-            opacity: _fadeController,
-            child: PageView(
-              controller: _pageController,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                _buildPhoneInputPage(),
-                _buildOtpInputPage(),
-              ],
+            child: SafeArea(
+              child: Column(
+                children: [
+                  // Custom App Bar
+                  _buildAppBar(context),
+                  
+                  // Page Content with scroll
+                  Expanded(
+                    child: FadeTransition(
+                      opacity: _fadeController,
+                      child: PageView(
+                        controller: _pageController,
+                        physics: const NeverScrollableScrollPhysics(),
+                        children: [
+                          _buildPhoneInputPage(),
+                          _buildOtpInputPage(),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -106,9 +151,54 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
     );
   }
 
-  Widget _buildPhoneInputPage() {
+  Widget _buildAppBar(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(AppSpacing.lg),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Row(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
+            child: IconButton(
+              onPressed: () => context.pop(),
+              icon: const Icon(
+                Icons.arrow_back_ios, 
+                color: Colors.white,
+                size: 20,
+              ),
+            ),
+          ),
+          
+          const Spacer(),
+          
+          Text(
+            'Phone Authentication',
+            style: AppTextStyles.h4.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          
+          const Spacer(),
+          
+          // Invisible container for centering
+          Container(width: 48),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPhoneInputPage() {
+    return SingleChildScrollView(
+      controller: _scrollController,
+      padding: EdgeInsets.only(
+        left: AppSpacing.lg,
+        right: AppSpacing.lg,
+        top: AppSpacing.lg,
+        bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
+      ),
       child: Form(
         key: _formKey,
         child: Column(
@@ -118,16 +208,21 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
             
             // Illustration
             Container(
-              height: 200,
+              height: 180,
+              padding: const EdgeInsets.all(AppSpacing.xl),
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(AppRadius.lg),
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(AppRadius.xl),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.2),
+                  width: 1,
+                ),
               ),
               child: const Center(
                 child: Icon(
                   Icons.phone_android_rounded,
                   size: 80,
-                  color: AppColors.primary,
+                  color: Colors.white,
                 ),
               ),
             ),
@@ -136,7 +231,11 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
             
             Text(
               'Enter your phone number',
-              style: AppTextStyles.h3,
+              style: AppTextStyles.h2.copyWith(
+                color: Colors.white,
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+              ),
               textAlign: TextAlign.center,
             ),
             
@@ -144,25 +243,33 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
             
             Text(
               'We\'ll send you a verification code to confirm your number',
-              style: AppTextStyles.bodyMedium.copyWith(
-                color: AppColors.textSecondary,
+              style: AppTextStyles.bodyLarge.copyWith(
+                color: Colors.white.withOpacity(0.8),
               ),
               textAlign: TextAlign.center,
             ),
             
             const SizedBox(height: AppSpacing.xl),
             
-            PhoneInputField(
-              controller: _phoneController,
-              focusNode: _phoneFocusNode,
-              validator: Validators.phone,
-              onChanged: (value) {
-                // Clear any previous errors
-                context.read<PhoneAuthCubit>().clearError();
-              },
+            // White container for input field
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 20,
+                    spreadRadius: 0,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: _buildPhoneInputWithCountryCode(),
             ),
             
-            const Spacer(),
+            const SizedBox(height: AppSpacing.xl * 2),
             
             BlocBuilder<PhoneAuthCubit, PhoneAuthState>(
               builder: (context, state) {
@@ -170,8 +277,8 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
                   onTap: state.isLoading ? null : _sendVerificationCode,
                   text: 'Send Verification Code',
                   isLoading: state.isLoading,
-                  backgroundColor: AppColors.primary,
-                  textColor: Colors.white,
+                  backgroundColor: Colors.white,
+                  textColor: AppColors.primary,
                 );
               },
             ),
@@ -183,9 +290,107 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
     );
   }
 
+  Widget _buildPhoneInputWithCountryCode() {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(
+          color: AppColors.grey.withOpacity(0.2),
+        ),
+      ),
+      child: Row(
+        children: [
+          // Country Code Picker - Fixed width
+          SizedBox(
+            width: 110, // Fixed width for country picker
+            child: CountryCodePicker(
+              onChanged: (countryCode) {
+                setState(() {
+                  _countryCode = countryCode.dialCode ?? '+1';
+                  _countryFlag = countryCode.flagUri ?? '🇺🇸';
+                });
+                context.read<PhoneAuthCubit>().clearError();
+              },
+              initialSelection: 'US',
+              favorite: const ['+1', 'US', '+44', 'GB', '+91', 'IN'],
+              showCountryOnly: false,
+              showOnlyCountryWhenClosed: false,
+              alignLeft: false,
+              showDropDownButton: true,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              textStyle: AppTextStyles.bodySmall.copyWith(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w500,
+                fontSize: 14,
+              ),
+              searchStyle: AppTextStyles.bodyMedium,
+              dialogTextStyle: AppTextStyles.bodyMedium,
+              barrierColor: Colors.black54,
+              backgroundColor: Colors.white,
+              boxDecoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+              ),
+            ),
+          ),
+          
+          // Divider
+          Container(
+            height: 30,
+            width: 1,
+            color: AppColors.grey.withOpacity(0.3),
+            margin: const EdgeInsets.only(right: 12),
+          ),
+          
+          // Phone number input - Takes remaining space
+          Expanded(
+            flex: 3, // Give more space to phone input
+            child: TextFormField(
+              controller: _phoneController,
+              focusNode: _phoneFocusNode,
+              keyboardType: TextInputType.phone,
+              validator: (value) => Validators.phone(value),
+              onChanged: (value) {
+                context.read<PhoneAuthCubit>().clearError();
+              },
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(15),
+              ],
+              style: AppTextStyles.bodyMedium.copyWith(
+                color: AppColors.textPrimary,
+                fontSize: 16,
+              ),
+              decoration: InputDecoration(
+                hintText: 'Phone number',
+                hintStyle: AppTextStyles.bodyMedium.copyWith(
+                  color: AppColors.textHint,
+                ),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                errorBorder: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 0,
+                  vertical: 16,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildOtpInputPage() {
-    return Padding(
-      padding: const EdgeInsets.all(AppSpacing.lg),
+    return SingleChildScrollView(
+      controller: _scrollController,
+      padding: EdgeInsets.only(
+        left: AppSpacing.lg,
+        right: AppSpacing.lg,
+        top: AppSpacing.lg,
+        bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
+      ),
       child: BlocBuilder<PhoneAuthCubit, PhoneAuthState>(
         builder: (context, state) {
           return Column(
@@ -195,16 +400,21 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
               
               // Illustration
               Container(
-                height: 200,
+                height: 180,
+                padding: const EdgeInsets.all(AppSpacing.xl),
                 decoration: BoxDecoration(
-                  color: AppColors.accent.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  color: Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(AppRadius.xl),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.2),
+                    width: 1,
+                  ),
                 ),
                 child: const Center(
                   child: Icon(
                     Icons.sms_rounded,
                     size: 80,
-                    color: AppColors.accent,
+                    color: Colors.white,
                   ),
                 ),
               ),
@@ -213,55 +423,79 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
               
               Text(
                 'Enter verification code',
-                style: AppTextStyles.h3,
+                style: AppTextStyles.h2.copyWith(
+                  color: Colors.white,
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold,
+                ),
                 textAlign: TextAlign.center,
               ),
               
               const SizedBox(height: AppSpacing.sm),
               
               Text(
-                'We sent a code to ${state.phoneVerification?.phoneNumber ?? _phoneController.text}',
-                style: AppTextStyles.bodyMedium.copyWith(
-                  color: AppColors.textSecondary,
+                'We sent a code to $_countryCode ${state.phoneVerification?.phoneNumber ?? _phoneController.text}',
+                style: AppTextStyles.bodyLarge.copyWith(
+                  color: Colors.white.withOpacity(0.8),
                 ),
                 textAlign: TextAlign.center,
               ),
               
               const SizedBox(height: AppSpacing.xl),
               
-              OtpInputField(
-                controller: _otpController,
-                focusNode: _otpFocusNode,
-                onChanged: (value) {
-                  context.read<PhoneAuthCubit>().clearError();
-                  if (value.length == 6) {
-                    _verifyCode();
-                  }
-                },
+              // White container for OTP input
+              Container(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 20,
+                      spreadRadius: 0,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: OtpInputField(
+                  controller: _otpController,
+                  focusNode: _otpFocusNode,
+                  onChanged: (value) {
+                    context.read<PhoneAuthCubit>().clearError();
+                    if (value.length == 6) {
+                      _verifyCode();
+                    }
+                  },
+                ),
               ),
               
               const SizedBox(height: AppSpacing.lg),
               
               // Resend code button
               if (state.canResend)
-                TextButton(
-                  onPressed: state.isLoading ? null : _resendCode,
-                  child: Text(
-                    'Didn\'t receive code? Resend',
-                    style: AppTextStyles.buttonMedium.copyWith(
-                      color: AppColors.primary,
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                  child: TextButton(
+                    onPressed: state.isLoading ? null : _resendCode,
+                    child: Text(
+                      'Didn\'t receive code? Resend',
+                      style: AppTextStyles.buttonMedium.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ),
               
-              const Spacer(),
+              const SizedBox(height: AppSpacing.xl),
               
               AuthButton(
                 onTap: state.isVerifying ? null : _verifyCode,
                 text: 'Verify Code',
                 isLoading: state.isVerifying,
-                backgroundColor: AppColors.accent,
-                textColor: Colors.white,
+                backgroundColor: Colors.white,
+                textColor: AppColors.accent,
               ),
               
               const SizedBox(height: AppSpacing.sm),
@@ -271,7 +505,7 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
                 child: Text(
                   'Change phone number',
                   style: AppTextStyles.buttonMedium.copyWith(
-                    color: AppColors.textSecondary,
+                    color: Colors.white.withOpacity(0.8),
                   ),
                 ),
               ),
@@ -286,8 +520,8 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
 
   void _sendVerificationCode() {
     if (_formKey.currentState?.validate() ?? false) {
-      final phoneNumber = _phoneController.text.trim();
-      context.read<PhoneAuthCubit>().sendVerificationCode(phoneNumber);
+      final fullPhoneNumber = '$_countryCode${_phoneController.text.trim()}';
+      context.read<PhoneAuthCubit>().sendVerificationCode(fullPhoneNumber);
       
       // Add haptic feedback
       HapticFeedback.mediumImpact();
@@ -320,7 +554,7 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
     );
     
     // Auto focus on OTP field
-    Future.delayed(const Duration(milliseconds: 500), () {
+    Future.delayed(const Duration(milliseconds: 800), () {
       _otpFocusNode.requestFocus();
     });
   }
@@ -338,4 +572,51 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
     // Add haptic feedback
     HapticFeedback.lightImpact();
   }
+
+  Future<void> _authenticateWithBackend(PhoneAuthState state) async {
+    // TODO: Get Firebase token from the verified user
+    // This should be implemented in your Firebase auth service
+    try {
+      // Example: Get Firebase token
+      // final firebaseToken = await FirebaseAuth.instance.currentUser?.getIdToken();
+      
+      // For now, showing success and navigating
+      context.showSuccessSnackBar('Phone verified successfully!');
+      context.go(AppRoutes.home);
+      
+      // TODO: Implement the backend authentication call
+      // await _sendTokenToBackend(firebaseToken);
+      
+    } catch (e) {
+      context.showErrorSnackBar('Failed to complete authentication: ${e.toString()}');
+    }
+  }
+
+  // TODO: Implement this method to send token to backend
+  /*
+  Future<void> _sendTokenToBackend(String firebaseToken) async {
+    try {
+      final response = await http.post(
+        Uri.parse('http://localhost:3000/auth/firebase-login'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'firebaseToken': firebaseToken,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        // Handle successful backend authentication
+        // Store backend token, user data, etc.
+        context.go(AppRoutes.home);
+      } else {
+        throw Exception('Backend authentication failed');
+      }
+    } catch (e) {
+      context.showErrorSnackBar('Backend authentication failed: ${e.toString()}');
+    }
+  }
+  */
 }
