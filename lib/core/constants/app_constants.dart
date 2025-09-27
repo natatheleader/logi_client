@@ -4,7 +4,7 @@ class AppConstants {
   static const String appVersion = '1.0.0';
   
   // API Configuration
-  static const String baseUrl = 'https://api.quickdeliver.com'; // Replace with your actual API URL
+  static const String baseUrl = 'http://localhost:3000'; // Replace with your actual API URL
   static const int connectionTimeout = 30000; // 30 seconds
   static const int receiveTimeout = 30000; // 30 seconds
   

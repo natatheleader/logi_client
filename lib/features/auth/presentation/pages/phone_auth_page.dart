@@ -9,6 +9,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/extensions.dart';
 import '../../../../core/utils/validators.dart';
 import '../cubit/phone_auth_cubit.dart';
+import '../cubit/auth_cubit.dart'; // Add this import
 import '../widgets/phone_input_field.dart';
 import '../widgets/otp_input_field.dart';
 import '../widgets/auth_button.dart';
@@ -95,19 +96,40 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider(
-      create: (context) => getIt<PhoneAuthCubit>(),
-      child: BlocListener<PhoneAuthCubit, PhoneAuthState>(
-        listener: (context, state) {
-          if (state.isCodeSent) {
-            _moveToOtpPage();
-          } else if (state.isVerified) {
-            // Send Firebase token to backend
-            _authenticateWithBackend(state);
-          } else if (state.hasError && state.error != null) {
-            context.showErrorSnackBar(state.error!);
-          }
-        },
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider<PhoneAuthCubit>(
+          create: (context) => getIt<PhoneAuthCubit>(),
+        ),
+        BlocProvider<AuthCubit>(
+          create: (context) => getIt<AuthCubit>(),
+        ),
+      ],
+      child: MultiBlocListener(
+        listeners: [
+          BlocListener<PhoneAuthCubit, PhoneAuthState>(
+            listener: (context, state) {
+              if (state.isCodeSent) {
+                _moveToOtpPage();
+              } else if (state.isVerified && state.user != null) {
+                // Phone verification successful, now exchange token with backend
+                _exchangeFirebaseTokenWithBackend();
+              } else if (state.hasError && state.error != null) {
+                context.showErrorSnackBar(state.error!);
+              }
+            },
+          ),
+          BlocListener<AuthCubit, AuthState>(
+            listener: (context, state) {
+              if (state.isAuthenticated) {
+                context.showSuccessSnackBar('Authentication successful!');
+                context.go(AppRoutes.home);
+              } else if (state.error != null) {
+                context.showErrorSnackBar(state.error!);
+              }
+            },
+          ),
+        ],
         child: Scaffold(
           resizeToAvoidBottomInset: false, // Prevent automatic resize
           body: Container(
@@ -490,12 +512,16 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
               
               const SizedBox(height: AppSpacing.xl),
               
-              AuthButton(
-                onTap: state.isVerifying ? null : _verifyCode,
-                text: 'Verify Code',
-                isLoading: state.isVerifying,
-                backgroundColor: Colors.white,
-                textColor: AppColors.accent,
+              BlocBuilder<AuthCubit, AuthState>(
+                builder: (context, authState) {
+                  return AuthButton(
+                    onTap: (state.isVerifying || authState.isLoading) ? null : _verifyCode,
+                    text: authState.isLoading ? 'Authenticating...' : 'Verify Code',
+                    isLoading: state.isVerifying || authState.isLoading,
+                    backgroundColor: Colors.white,
+                    textColor: AppColors.accent,
+                  );
+                },
               ),
               
               const SizedBox(height: AppSpacing.sm),
@@ -573,50 +599,20 @@ class _PhoneAuthPageState extends State<PhoneAuthPage>
     HapticFeedback.lightImpact();
   }
 
-  Future<void> _authenticateWithBackend(PhoneAuthState state) async {
-    // TODO: Get Firebase token from the verified user
-    // This should be implemented in your Firebase auth service
+  void _exchangeFirebaseTokenWithBackend() async {
     try {
-      // Example: Get Firebase token
-      // final firebaseToken = await FirebaseAuth.instance.currentUser?.getIdToken();
+      // The phone verification is complete, Firebase user is signed in
+      // Now trigger the complete authentication flow which will:
+      // 1. Get the Firebase token from the current user
+      // 2. Send it to the backend at /auth/firebase-login
+      // 3. Get back the backend tokens and user data
+      // 4. Store everything locally
       
-      // For now, showing success and navigating
-      context.showSuccessSnackBar('Phone verified successfully!');
-      context.go(AppRoutes.home);
-      
-      // TODO: Implement the backend authentication call
-      // await _sendTokenToBackend(firebaseToken);
+      final authCubit = context.read<AuthCubit>();
+      await authCubit.checkAuthStatus();
       
     } catch (e) {
-      context.showErrorSnackBar('Failed to complete authentication: ${e.toString()}');
+      context.showErrorSnackBar('Authentication failed: ${e.toString()}');
     }
   }
-
-  // TODO: Implement this method to send token to backend
-  /*
-  Future<void> _sendTokenToBackend(String firebaseToken) async {
-    try {
-      final response = await http.post(
-        Uri.parse('http://localhost:3000/auth/firebase-login'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'firebaseToken': firebaseToken,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        // Handle successful backend authentication
-        // Store backend token, user data, etc.
-        context.go(AppRoutes.home);
-      } else {
-        throw Exception('Backend authentication failed');
-      }
-    } catch (e) {
-      context.showErrorSnackBar('Backend authentication failed: ${e.toString()}');
-    }
-  }
-  */
 }

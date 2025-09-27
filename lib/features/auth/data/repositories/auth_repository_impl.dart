@@ -53,17 +53,22 @@ class AuthRepositoryImpl implements AuthRepository {
         return Left(NetworkFailure(message: 'No internet connection'));
       }
 
-      // Verify with Firebase first
+      // Step 1: Verify with Firebase first
       final firebaseUser = await firebaseDataSource.verifyPhoneCode(verificationId, code);
       
-      // Get Firebase token and exchange for app token
+      // Step 2: Get Firebase token
       final firebaseToken = await firebaseDataSource.getCurrentFirebaseToken();
+      
+      // Step 3: Exchange Firebase token for backend tokens
       final authTokens = await remoteDataSource.exchangeFirebaseToken(firebaseToken);
       
-      // Store tokens and user data
-      await _storeAuthData(authTokens, firebaseUser);
+      // Step 4: Get complete user data from backend
+      final backendUser = await remoteDataSource.getCurrentUser();
       
-      return Right(firebaseUser);
+      // Step 5: Store tokens and user data
+      await _storeAuthData(authTokens, backendUser);
+      
+      return Right(backendUser);
     } on NetworkException catch (e) {
       return Left(NetworkFailure(message: e.message));
     } on AuthenticationException catch (e) {
@@ -101,17 +106,22 @@ class AuthRepositoryImpl implements AuthRepository {
         return Left(NetworkFailure(message: 'No internet connection'));
       }
 
-      // Sign in with Firebase Google
+      // Step 1: Sign in with Firebase Google
       final firebaseUser = await firebaseDataSource.signInWithGoogle();
       
-      // Get Firebase token and exchange for app token
+      // Step 2: Get Firebase token
       final firebaseToken = await firebaseDataSource.getCurrentFirebaseToken();
+      
+      // Step 3: Exchange Firebase token for backend tokens
       final authTokens = await remoteDataSource.exchangeFirebaseToken(firebaseToken);
       
-      // Store tokens and user data
-      await _storeAuthData(authTokens, firebaseUser);
+      // Step 4: Get complete user data from backend
+      final backendUser = await remoteDataSource.getCurrentUser();
       
-      return Right(firebaseUser);
+      // Step 5: Store tokens and user data
+      await _storeAuthData(authTokens, backendUser);
+      
+      return Right(backendUser);
     } on NetworkException catch (e) {
       return Left(NetworkFailure(message: e.message));
     } on AuthenticationException catch (e) {
@@ -188,33 +198,29 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<Either<Failure, User>> getCurrentUser() async {
     try {
-      // First check if user is stored locally
+      // Check if we have a Firebase user and can get fresh data from backend
+      final firebaseUser = firebaseDataSource.getCurrentFirebaseUser();
+      
+      if (firebaseUser != null && await networkInfo.isConnected && storageService.isLoggedIn()) {
+        try {
+          // We have a Firebase user and network, get fresh data from backend
+          final serverUser = await remoteDataSource.getCurrentUser();
+          await storageService.setUserData(jsonEncode(serverUser.toJson()));
+          return Right(serverUser);
+        } catch (e) {
+          // If backend call fails, fall back to cached data
+        }
+      }
+      
+      // Check cached user data
       final userData = storageService.getUserData();
       if (userData != null) {
         final userJson = jsonDecode(userData);
         final user = UserModel.fromJson(userJson);
-        
-        // If it's a guest user, return directly
-        if (user.isGuest) {
-          return Right(user);
-        }
-        
-        // For registered users, check if we need to refresh from server
-        if (await networkInfo.isConnected && storageService.isLoggedIn()) {
-          try {
-            final serverUser = await remoteDataSource.getCurrentUser();
-            await storageService.setUserData(jsonEncode(serverUser.toJson()));
-            return Right(serverUser);
-          } catch (e) {
-            // Return cached user if server request fails
-            return Right(user);
-          }
-        }
-        
         return Right(user);
       }
       
-      // No cached user found
+      // No user found
       return Left(AuthenticationFailure(message: 'No user found'));
     } catch (e) {
       return Left(UnknownFailure(message: 'Failed to get user: ${e.toString()}'));
@@ -299,41 +305,30 @@ class AuthRepositoryImpl implements AuthRepository {
     }
   }
 
-    @override
-    Future<Either<Failure, User>> convertGuestToRegistered(AuthProvider provider) async {
-        try {
-            if (!await networkInfo.isConnected) {
-                return Left(NetworkFailure(message: 'No internet connection'));
-            }
+  @override
+  Future<Either<Failure, User>> convertGuestToRegistered(AuthProvider provider) async {
+    try {
+      if (!await networkInfo.isConnected) {
+        return Left(NetworkFailure(message: 'No internet connection'));
+      }
 
-            if (provider != AuthProvider.google) {
-                return Left(ValidationFailure(message: 'Phone conversion requires separate flow'));
-            }
-
-            // Call signInWithGoogle directly and return its result.
-            // Dartz's Either will handle the success or failure automatically.
-            final result = await signInWithGoogle();
-            
-            // Clear guest data only if the conversion was successful.
-            // The `.then()` call ensures this code runs only on success.
-            return result.fold(
-                (failure) => Left(failure),
-                (user) async {
-                    await storageService.clearAll();
-                    return Right(user!);
-                },
-            );
-
-        } on NetworkException catch (e) {
-            return Left(NetworkFailure(message: e.message));
-        } on AuthenticationException catch (e) {
-            return Left(AuthenticationFailure(message: e.message, code: e.statusCode));
-        } on ServerException catch (e) {
-            return Left(ServerFailure(message: e.message, code: e.statusCode));
-        } catch (e) {
-            return Left(UnknownFailure(message: 'Account conversion failed: ${e.toString()}'));
-        }
+      if (provider == AuthProvider.google) {
+        // For Google conversion, use the signInWithGoogle method
+        final result = await signInWithGoogle();
+        return result.fold(
+          (failure) => Left(failure),
+          (user) async {
+            // Clear guest data on successful conversion
+            return Right(user);
+          },
+        );
+      } else {
+        return Left(ValidationFailure(message: 'Phone conversion requires separate flow'));
+      }
+    } catch (e) {
+      return Left(UnknownFailure(message: 'Account conversion failed: ${e.toString()}'));
     }
+  }
 
   // Private helper methods
   Future<void> _storeAuthData(AuthTokens tokens, User user) async {

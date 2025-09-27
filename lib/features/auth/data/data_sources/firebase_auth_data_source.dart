@@ -12,6 +12,7 @@ abstract class FirebaseAuthDataSource {
   Future<PhoneVerificationModel> resendPhoneCode(String phoneNumber, int? resendToken);
   Future<UserModel> signInWithGoogle();
   Future<String> getCurrentFirebaseToken();
+  firebase_auth.User? getCurrentFirebaseUser();
   Future<void> signOut();
 }
 
@@ -145,6 +146,11 @@ class FirebaseAuthDataSourceImpl implements FirebaseAuthDataSource {
       throw AuthenticationException(message: 'Failed to fetch Firebase token');
     }
     return token;
+  }
+
+  @override
+  firebase_auth.User? getCurrentFirebaseUser() {
+    return _firebaseAuth.currentUser;
   }
 
 
